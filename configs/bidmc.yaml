@@ -1,0 +1,33 @@
+# PhysioNet BIDMC PPG and Respiration (ODC-By 1.0): ICU PPG at 125 Hz, ~8 min per record.
+# No beat annotations are available for the PPG, so this config exercises QC and the
+# detectors only; the evaluation stage is skipped and the report shows beat counts.
+name: bidmc
+data:
+  raw_dir: data/raw
+  verify_checksums: true
+  records:
+    - db: bidmc
+      channel: "PLETH,"          # the channel name in the WFDB header carries a trailing comma
+      annotator: null
+      activity: icu
+      names: [bidmc01, bidmc02, bidmc03, bidmc04, bidmc05]
+preprocess:
+  invert: false
+  band_hz: [0.5, 8.0]
+windows:
+  length_s: 10
+qc:
+  version: 1
+  rules:
+    - {name: nan_dropout, max_frac: 0.01}
+    - {name: sampling_gap, max_gap_s: 0.2}
+    - {name: flatline, max_flat_s: 0.5}
+    - {name: clipping, max_frac: 0.02, min_run: 3, rel_tol: 0.001}
+    - {name: plausible_range, lo: 0.0, hi: 1.0}   # BIDMC PLETH is normalised to [0, 1]
+    - {name: periodicity, min_acf: 0.5, lag_range_s: [0.3, 2.0]}
+detectors:
+  - {name: elgendi}
+  - {name: msptd}
+  - {name: prominence, min_rr_s: 0.3, prominence_sd: 0.5}
+output_dir: runs
+cache_dir: cache

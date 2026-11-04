@@ -46,3 +46,8 @@ select = ["E", "F", "I", "B", "UP", "W"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = [
+    "ignore:The inplace keyword:DeprecationWarning",
+    "ignore::DeprecationWarning:wfdb",
+    "ignore::FutureWarning:wfdb",
+]

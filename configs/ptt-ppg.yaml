@@ -24,6 +24,9 @@ qc:
     - {name: flatline, max_flat_s: 0.5}
     - {name: clipping, max_frac: 0.02, min_run: 3, rel_tol: 0.001}
     - {name: plausible_range, lo: 1, hi: 262143}   # MAX30101 is an 18-bit ADC; 0 means no light
+    # Signal-quality heuristic, not an acquisition fault. Threshold 0.5 was chosen by looking at
+    # these same six subjects (see README, Limits), so gated scores are optimistic.
+    - {name: periodicity, min_acf: 0.5, lag_range_s: [0.3, 2.0]}
 detectors:
   - {name: elgendi}
   - {name: msptd}

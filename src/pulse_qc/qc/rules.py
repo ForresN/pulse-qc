@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-RULES_VERSION = 1
+RULES_VERSION = 2  # 2: added `periodicity`
 
 
 @dataclass(frozen=True)
@@ -122,3 +122,47 @@ RULES: dict[str, RuleFn] = {
     "clipping": clipping,
     "plausible_range": plausible_range,
 }
+
+
+def periodicity(
+    x: np.ndarray,
+    fs: float,
+    *,
+    min_acf: float = 0.5,
+    lag_range_s: tuple[float, float] = (0.3, 2.0),
+    band_hz: tuple[float, float] = (0.5, 8.0),
+) -> RuleResult:
+    """Fail when the window has no dominant periodicity in the plausible inter-beat range.
+
+    The window is NaN-interpolated, mean-removed and band-passed (``band_hz``, zero-phase,
+    3rd-order Butterworth) inside the rule so that it does not depend on the pipeline's
+    preprocessing. The value is the peak of the normalised autocorrelation at lags
+    between ``lag_range_s`` (0.3–2.0 s is 30–200 beats/min). A pulsatile window has a
+    clear peak; motion artefact, a loose sensor or noise does not. This is a signal-quality
+    heuristic, not an acquisition fault, and its threshold is dataset-dependent."""
+    from scipy import signal as ss
+
+    y = np.asarray(x, dtype=float).copy()
+    bad = ~np.isfinite(y)
+    if bad.all() or y.size < int(lag_range_s[1] * fs) + 2:
+        return RuleResult(False, 0.0, "window too short or empty for periodicity")
+    if bad.any():
+        idx = np.arange(y.size)
+        y[bad] = np.interp(idx[bad], idx[~bad], y[~bad])
+    y = y - y.mean()
+    hi = min(band_hz[1], 0.95 * fs / 2)
+    sos = ss.butter(3, [band_hz[0], hi], btype="band", fs=fs, output="sos")
+    y = ss.sosfiltfilt(sos, y)
+    denom = float(np.dot(y, y))
+    if denom == 0:
+        return RuleResult(False, 0.0, "no variation in window")
+    acf = ss.correlate(y, y, mode="full", method="fft")[y.size - 1 :] / denom
+    lo, hi_lag = int(lag_range_s[0] * fs), int(lag_range_s[1] * fs)
+    peak = float(acf[lo:hi_lag].max())
+    ok = peak >= min_acf
+    return RuleResult(
+        ok, peak, "" if ok else f"autocorrelation peak {peak:.2f} (min {min_acf:.2f})"
+    )
+
+
+RULES["periodicity"] = periodicity

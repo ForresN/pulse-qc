@@ -278,7 +278,17 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
         for det_cfg in cfg["detectors"]:
             peaks, det_key = _detect(y, rec.fs, pre_key, det_cfg, cache)
             detections[det_cfg["name"]] = peaks
+            det_row = {
+                "record": rid,
+                "activity": activity,
+                "detector": det_cfg["name"],
+                "n_detected": int(len(peaks)),
+                "detected_per_min": float(len(peaks) / rec.duration_s * 60),
+                "lag_s": np.nan,
+                "abs_err_ms_median": np.nan,
+            }
             if rec.ann_samples is None:
+                lag_rows.append(det_row)
                 continue
             counts, lag = _evaluate(
                 rec, peaks, windows, det_key, qc_key, cfg, cache, det_cfg["name"]
@@ -287,16 +297,9 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
             counts["passed"] = counts["passed"].astype("boolean")
             counts = counts.assign(record=rid, activity=activity, detector=det_cfg["name"])
             count_frames.append(counts)
-            lag_rows.append(
-                {
-                    "record": rid,
-                    "activity": activity,
-                    "detector": det_cfg["name"],
-                    "lag_s": lag,
-                    "n_detected": int(len(peaks)),
-                    "abs_err_ms_median": float(counts["abs_err_ms_median"].iloc[0]),
-                }
-            )
+            det_row["lag_s"] = lag
+            det_row["abs_err_ms_median"] = float(counts["abs_err_ms_median"].iloc[0])
+            lag_rows.append(det_row)
         if not examples:
             examples = {
                 "record": rid,
@@ -317,7 +320,18 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
             columns=["record", "activity", "detector", "window", "passed", "tp", "fn", "fp"]
         )
     )
-    lags = pd.DataFrame(lag_rows)
+    lags = pd.DataFrame(
+        lag_rows,
+        columns=[
+            "record",
+            "activity",
+            "detector",
+            "n_detected",
+            "detected_per_min",
+            "lag_s",
+            "abs_err_ms_median",
+        ],
+    )
     summary = summarise_counts(beat_counts)
 
     result = RunResult(

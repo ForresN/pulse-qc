@@ -7,6 +7,7 @@ from pulse_qc.qc.rules import (
     clipping,
     flatline,
     nan_dropout,
+    periodicity,
     plausible_range,
     sampling_gap,
 )
@@ -23,7 +24,14 @@ def test_longest_run():
 
 
 def test_registry_lists_every_rule():
-    assert set(RULES) == {"nan_dropout", "sampling_gap", "flatline", "clipping", "plausible_range"}
+    assert set(RULES) == {
+        "nan_dropout",
+        "sampling_gap",
+        "flatline",
+        "clipping",
+        "plausible_range",
+        "periodicity",
+    }
 
 
 class TestNanDropout:
@@ -122,3 +130,30 @@ class TestPlausibleRange:
         y = np.r_[np.ones(99), 100.0]
         assert not plausible_range(y, FS, lo=0, hi=10).passed
         assert plausible_range(y, FS, lo=0, hi=10, max_frac=0.02).passed
+
+
+class TestPeriodicity:
+    def test_clean_pulse_train_passes(self, x):
+        r = periodicity(x[: int(10 * FS)], FS, min_acf=0.5)
+        assert r.passed and r.value > 0.7
+
+    def test_noise_fails(self):
+        y = np.random.default_rng(0).normal(size=int(10 * FS))
+        r = periodicity(y, FS, min_acf=0.5)
+        assert not r.passed and "autocorrelation" in r.reason
+
+    def test_constant_fails(self):
+        assert not periodicity(np.ones(2000), FS).passed
+
+    def test_too_short_fails(self):
+        assert not periodicity(np.ones(50), FS).passed
+
+    def test_tolerates_scattered_nan(self, x):
+        y = x[: int(10 * FS)].copy()
+        y[::40] = np.nan
+        assert periodicity(y, FS, min_acf=0.5).passed
+
+    def test_periodicity_outside_lag_range_fails(self):
+        t = np.arange(0, 10, 1 / FS)
+        y = np.sin(2 * np.pi * 0.2 * t)  # 12 beats/min: too slow to be a pulse
+        assert not periodicity(y, FS, lag_range_s=(0.3, 2.0)).passed

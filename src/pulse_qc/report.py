@@ -144,6 +144,23 @@ def write_report(run_dir: Path, figures: bool = True) -> Path:
         md.append(_md_table(reasons, ["rule", "windows failed"]))
     md.append("")
     summary = r["summary"]
+    lags = r["lags"]
+    if summary.empty and not lags.empty:
+        md.append("## Beat detection (no reference annotations)")
+        md.append("")
+        md.append(
+            "This dataset has no beat annotations for this channel, so detections are "
+            "reported as counts only. Agreement between detectors is not accuracy."
+        )
+        md.append("")
+        md.append(
+            _md_table(
+                lags,
+                ["record", "detector", "n_detected", "detected_per_min"],
+                {"n_detected": lambda v: f"{int(v)}", "detected_per_min": lambda v: f"{v:.1f}"},
+            )
+        )
+        md.append("")
     if not summary.empty:
         ecfg = cfg["evaluation"]
         md.append("## Beat detection vs annotations")
@@ -158,7 +175,6 @@ def write_report(run_dir: Path, figures: bool = True) -> Path:
         gt = gating_table(summary)
         md.append(_md_table(gt, list(gt.columns), {"beats (all)": str, "beats (passed)": str}))
         md.append("")
-        lags = r["lags"]
         md.append("Per-record lag (s), median over records by activity and detector:")
         md.append("")
         lt = lags.groupby(["detector", "activity"])["lag_s"].median().reset_index()
