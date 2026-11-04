@@ -16,6 +16,6 @@ jobs:
       - name: Install
         run: uv sync --all-groups --locked
       - name: Lint
-        run: uv run ruff check src tests && uv run ruff format --check src tests
+        run: uv run ruff check src tests examples && uv run ruff format --check src tests examples
       - name: Test (synthetic fixtures only, no PhysioNet access)
         run: uv run pytest -q

@@ -27,7 +27,12 @@ def code_hash(*objects: Any) -> str:
     to a stage must invalidate that stage's cache entries too."""
     h = hashlib.sha256()
     for obj in objects:
-        h.update(inspect.getsource(obj).encode())
+        try:
+            h.update(inspect.getsource(obj).encode())
+        except (OSError, TypeError):  # e.g. defined interactively: fall back to its name
+            h.update(
+                f"{getattr(obj, '__module__', '')}.{getattr(obj, '__qualname__', obj)}".encode()
+            )
     return h.hexdigest()
 
 

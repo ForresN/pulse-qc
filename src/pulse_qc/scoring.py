@@ -1,4 +1,6 @@
-"""Score detected beats against reference annotations.
+"""Score detected beats against reference annotations (the metric code).
+
+The user-facing entry point is :func:`pulse_qc.evaluate`, which runs a whole config.
 
 The reference beats in the PTT-PPG set are ECG R-peaks, and a PPG systolic
 peak arrives a pulse-arrival time later (roughly 150–400 ms at the finger). So

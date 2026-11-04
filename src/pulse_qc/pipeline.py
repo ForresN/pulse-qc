@@ -20,8 +20,8 @@ import pandas as pd
 import yaml
 
 from pulse_qc import detect as detect_mod
-from pulse_qc import evaluate as eval_mod
 from pulse_qc import ingest, synth
+from pulse_qc import scoring as eval_mod
 from pulse_qc.cache import Cache, code_hash, config_hash, make_key
 from pulse_qc.ingest import Record
 from pulse_qc.qc import RuleSet, apply_rules
@@ -40,6 +40,7 @@ def load_config(path: Path) -> dict[str, Any]:
     cfg.setdefault("evaluation", {"tolerance_ms": 100, "lag_search_ms": [0, 600]})
     cfg.setdefault("output_dir", "runs")
     cfg.setdefault("cache_dir", "cache")
+    cfg.setdefault("plugins", [])
     return cfg
 
 
@@ -306,8 +307,20 @@ class RunResult:
     neuro: dict[str, Any] = field(default_factory=dict)
 
 
+def load_plugins(cfg: dict[str, Any]) -> list[str]:
+    """Import every module named under ``plugins:`` so that its ``@register_detector`` /
+    ``@register_rule`` decorators run. Returns the imported module names."""
+    import importlib
+
+    names = list(cfg.get("plugins", []) or [])
+    for name in names:
+        importlib.import_module(name)
+    return names
+
+
 def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = None) -> RunResult:
     root = Path(root or ".")
+    load_plugins(cfg)
     cache = cache or Cache(root / cfg["cache_dir"])
     cache.reset_events()
     cfg_hash = config_fingerprint(cfg)

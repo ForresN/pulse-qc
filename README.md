@@ -152,6 +152,31 @@ uv run pulse-qc report runs/ptt-ppg-<hash>     # regenerate report.md and figure
 uv run pulse-qc holdout runs/ptt-ppg-<hash>    # leave-one-subject-out threshold + held-out scores
 ```
 
+## Use it from Python
+
+The CLI is a thin layer over three functions. A comparison that another person, or an
+agent, can run without touching internals:
+
+```python
+import pulse_qc
+
+result = pulse_qc.evaluate("configs/ptt-ppg.yaml")        # cached; second call is instant
+print(result.gating_table())                               # F1 all / QC-passed / QC-failed
+result.provenance["git"]                                   # sha, dirty flag, packages, record hashes
+
+@pulse_qc.register_detector("my_peaks")
+def my_peaks(y, fs, *, min_rr_s=0.3):
+    ...                                                    # return peak sample indices
+    
+variant = pulse_qc.evaluate("configs/ptt-ppg.yaml", detectors=["elgendi", "my_peaks"],
+                            name="my-variant")
+print(pulse_qc.compare("configs/ptt-ppg.yaml", variant.config))
+```
+
+`register_rule` does the same for quality rules, including the hold-out threshold
+tuning. [docs/adding-a-detector.md](docs/adding-a-detector.md) is the full walkthrough and
+`examples/custom_detector.py` a runnable one.
+
 ## How it works
 
 ```
@@ -178,12 +203,14 @@ load  ->  preprocess  ->  detect (x3)  ->  evaluate (x3)
   deliberately plain `scipy.signal.find_peaks` baseline, all on the same preprocessed
   signal (NaN interpolation, 0.5–8 Hz zero-phase band-pass, polarity flip for raw
   reflectance PPG).
-- **Evaluation** (`evaluate.py`): per-record lag estimate, greedy one-to-one matching
+- **Scoring** (`scoring.py`): per-record lag estimate, greedy one-to-one matching
   within a tolerance, counts attributed per window so the same detections can be scored
   over all windows, QC-passed windows, or by activity.
 - **Neuro features** (`neuro.py`): per-beat pulse amplitude and the masked moving ICP–ABP
   correlation, paired by record name, cached like every other stage.
 - **Report** (`report.py`): Markdown, figures, `provenance.json`.
+- **API** (`api.py`): `evaluate`, `compare`, `register_detector`, `register_rule`; a
+  config may also list `plugins:` modules to import before a run.
 - **Hold-out** (`holdout.py`): leave-one-subject-out choice of a rule's threshold (Youden's J
   for flagging windows whose beat F1 is below 0.9), scored on the held-out subjects only.
 

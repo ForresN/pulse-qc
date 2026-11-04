@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from pulse_qc.detect import DETECTORS, preprocess, run_detector
-from pulse_qc.evaluate import estimate_lag, match_beats, per_window_counts, scores, summarise
+from pulse_qc.scoring import estimate_lag, match_beats, per_window_counts, scores, summarise
 from pulse_qc.synth import inject_nan, synthetic_ppg
 from pulse_qc.windows import make_windows
 
