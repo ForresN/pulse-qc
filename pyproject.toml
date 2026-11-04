@@ -1,6 +1,6 @@
 [project]
 name = "pulse-qc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Data-quality gating and beat-detection evaluation for open pulsatile physiological waveforms (PPG, ABP, ICP)."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
