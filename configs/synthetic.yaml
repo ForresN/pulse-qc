@@ -5,6 +5,7 @@ data:
     - db: synthetic
       channel: signal
       annotator: beats
+      subject_pattern: "_([a-z])$"     # clean_a and dropout_a are "subject a"
       names: [clean_a, clean_b, dropout_a, flat_a, clipped_a]
 preprocess:
   invert: false
@@ -19,6 +20,7 @@ qc:
     - {name: flatline, max_flat_s: 0.5}
     - {name: clipping, max_frac: 0.02, min_run: 3}
     - {name: plausible_range, lo: -1, hi: 10}
+    - {name: periodicity, min_acf: 0.5, lag_range_s: [0.3, 2.0]}
 detectors:
   - {name: elgendi}
   - {name: prominence}

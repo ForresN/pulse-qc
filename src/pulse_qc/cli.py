@@ -90,5 +90,22 @@ def report(
     typer.echo(f"report: {out}")
 
 
+@app.command()
+def holdout(
+    run_dir: Path = typer.Argument(
+        ..., exists=True, file_okay=False, help="A runs/<name>-<hash> directory"
+    ),
+    rule: list[str] = typer.Option(["periodicity"], help="Single-threshold rule(s) to tune"),
+    bad_f1: float = typer.Option(0.9, help="A window is 'bad' below this mean beat F1"),
+) -> None:
+    """Choose rule thresholds on held-out subjects (leave-one-subject-out) and score gating
+    on subjects the threshold never saw."""
+    from pulse_qc.holdout import write_holdout
+
+    out = write_holdout(run_dir, list(rule), bad_f1=bad_f1)
+    typer.echo(out.read_text())
+    typer.echo(f"wrote {out}")
+
+
 if __name__ == "__main__":
     app()

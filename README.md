@@ -19,12 +19,14 @@ a product.
 - **Small evaluation set.** Six subjects, three activities each, from one dataset
   (the Pulse Transit Time PPG set). The numbers below describe those 18 records, not PPG
   in general.
-- **The `periodicity` rule was tuned on the evaluation data.** The five acquisition-fault
-  rules (dropout, gaps, flatline, clipping, implausible range) never fire on this
-  lab-grade dataset, so the only rule that changes the scores is a periodicity heuristic
-  whose threshold I chose after looking at the same six subjects. The "QC-passed" scores
-  are therefore optimistic and should be read as "what gating of this kind can do", not
-  as a measured generalisation.
+- **Only one rule does any work on this dataset, and it is a heuristic.** The five
+  acquisition-fault rules (dropout, gaps, flatline, clipping, implausible range) never fire
+  on the lab-grade PTT-PPG recordings. The rule that changes the scores is `periodicity`
+  (autocorrelation peak in the plausible inter-beat range). Its threshold is chosen by
+  leave-one-subject-out, and the held-out numbers below are the honest ones: it helps a
+  lot for walking (AUC 0.88 for flagging bad windows), barely for running (0.63), and not
+  at all for sitting (0.49), and it buys its gain by discarding about a quarter of all
+  windows.
 - **Reference beats are ECG R-peaks, not PPG peaks.** The scorer removes one constant
   lag per record (the median R-to-pulse delay, about 0.3 s here) and then matches within
   ±100 ms. Beat-to-beat changes in pulse arrival time count against the detector.
@@ -35,33 +37,36 @@ a product.
 ## Results from a real run
 
 18 records from PhysioNet's Pulse Transit Time PPG dataset (infrared channel `pleth_2`,
-500 Hz, subjects 1–6, sitting / walking / running), 13,653 annotated beats, 891 windows of
-10 s, of which 829 (93%) passed all rules. Only the `periodicity` rule failed any window.
-Tolerance ±100 ms after per-record lag removal.
+500 Hz, subjects 1–6, sitting / walking / running), 13,653 annotated beats in 891 windows
+of 10 s. Tolerance ±100 ms after per-record lag removal. Gating is **held-out**: for each
+subject the `periodicity` threshold was chosen on the other five (it came out at 0.60–0.65
+in every fold), then applied to that subject; the table pools the held-out windows.
 
-| detector | activity | beats | F1 all windows | F1 QC-passed | F1 QC-failed |
+| detector | activity | beats | F1 all windows | F1 QC-passed (held-out) | beats kept |
 |---|---|---|---|---|---|
-| elgendi (NeuroKit2) | all | 13,653 | 0.942 | 0.952 | 0.813 |
-| elgendi | sit | 4,131 | 0.983 | 0.983 | – |
-| elgendi | walk | 4,717 | 0.915 | 0.939 | 0.797 |
-| elgendi | run | 4,805 | 0.933 | 0.936 | 0.866 |
-| msptd (NeuroKit2) | all | 13,653 | 0.933 | 0.945 | 0.788 |
-| msptd | sit | 4,131 | 0.980 | 0.980 | – |
-| msptd | walk | 4,717 | 0.893 | 0.920 | 0.763 |
-| msptd | run | 4,805 | 0.931 | 0.934 | 0.872 |
-| prominence (scipy baseline) | all | 13,653 | 0.943 | 0.952 | 0.832 |
-| prominence | sit | 4,131 | 0.983 | 0.983 | – |
-| prominence | walk | 4,717 | 0.912 | 0.935 | 0.807 |
-| prominence | run | 4,805 | 0.939 | 0.940 | 0.921 |
+| elgendi (NeuroKit2) | all | 13,653 | 0.942 | 0.969 | 74% |
+| elgendi | sit | 4,131 | 0.983 | 0.982 | 97% |
+| elgendi | walk | 4,717 | 0.915 | 0.983 | 53% |
+| elgendi | run | 4,805 | 0.933 | 0.944 | 76% |
+| msptd (NeuroKit2) | all | 13,653 | 0.933 | 0.965 | 74% |
+| msptd | sit | 4,131 | 0.980 | 0.980 | 97% |
+| msptd | walk | 4,717 | 0.893 | 0.969 | 53% |
+| msptd | run | 4,805 | 0.931 | 0.944 | 76% |
+| prominence (scipy baseline) | all | 13,653 | 0.943 | 0.969 | 74% |
+| prominence | sit | 4,131 | 0.983 | 0.983 | 97% |
+| prominence | walk | 4,717 | 0.912 | 0.982 | 53% |
+| prominence | run | 4,805 | 0.939 | 0.944 | 76% |
 
 What I take from this: the three detectors are within a point of each other once the
 signal is preprocessed the same way, the simple baseline included; walking hurts more than
-running on this data; and gating removes 7% of windows that carry a disproportionate
-share of the errors (F1 about 0.8 on the gated-out windows versus 0.95 on the rest).
-Median absolute timing error after lag removal is 8–12 ms, so the misses are missed or
-spurious beats, not jitter.
+running on this data; and a periodicity gate chosen on other subjects lifts walking F1
+from about 0.91 to 0.98, but only by throwing away nearly half of the walking windows.
+Whether that trade is worth it depends entirely on what the beats are for. Median absolute
+timing error after lag removal is 8–12 ms, so the misses are missed or spurious beats, not
+jitter. The in-sample version of this table (threshold 0.65 on all six subjects) is in each
+run's `report.md`; `pulse-qc holdout <run>` writes the held-out one.
 
-![F1 by activity, with and without quality gating](docs/fig_f1_by_activity.png)
+![Held-out F1 by activity, with and without quality gating](docs/fig_f1_heldout_periodicity.png)
 
 ![Example record with QC windows shaded](docs/fig_example_qc.png)
 
@@ -87,6 +92,7 @@ uv run pulse-qc run configs/synthetic.yaml     # end-to-end on generated signals
 uv run pulse-qc run configs/ptt-ppg.yaml
 uv run pulse-qc compare configs/ptt-ppg-acquisition-only.yaml configs/ptt-ppg.yaml
 uv run pulse-qc report runs/ptt-ppg-<hash>     # regenerate report.md and figures
+uv run pulse-qc holdout runs/ptt-ppg-<hash>    # leave-one-subject-out threshold + held-out scores
 ```
 
 ## How it works
@@ -117,6 +123,8 @@ load  ->  preprocess  ->  detect (x3)  ->  evaluate (x3)
   within a tolerance, counts attributed per window so the same detections can be scored
   over all windows, QC-passed windows, or by activity.
 - **Report** (`report.py`): Markdown, two figures, `provenance.json`.
+- **Hold-out** (`holdout.py`): leave-one-subject-out choice of a rule's threshold (Youden's J
+  for flagging windows whose beat F1 is below 0.9), scored on the held-out subjects only.
 
 A declarative config is the unit of reproducibility. Two configs that differ in one
 rule produce two run directories, and `pulse-qc compare` prints the config diff, which
@@ -165,4 +173,3 @@ licences as above.
   ICP–ABP correlation, clearly labelled as non-clinical.
 - Rules that use auxiliary channels (the PTT-PPG set has an IMU; motion is what actually
   breaks these windows).
-- Choose the periodicity threshold on held-out subjects.

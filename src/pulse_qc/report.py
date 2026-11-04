@@ -223,6 +223,48 @@ def write_report(run_dir: Path, figures: bool = True) -> Path:
     return out
 
 
+def f1_bar_figure(gt: pd.DataFrame, path: Path, title: str) -> None:
+    """Grouped bars of F1 over all windows vs QC-passed windows, one panel per detector."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    gt = gt[gt["activity"] != "all"] if (gt["activity"] != "all").any() else gt
+    dets = list(dict.fromkeys(gt["detector"]))
+    acts = list(dict.fromkeys(gt["activity"]))
+    fig, axes = plt.subplots(
+        1, len(dets), figsize=(3.2 * len(dets) + 1, 3.4), sharey=True, squeeze=False
+    )
+    for ax, det in zip(axes[0], dets, strict=True):
+        sub = gt[gt["detector"] == det].set_index("activity").reindex(acts)
+        xs = np.arange(len(acts))
+        ax.bar(xs - 0.2, sub["F1 (all)"], 0.4, label="all windows", color="#9aa5b1")
+        ax.bar(xs + 0.2, sub["F1 (passed)"], 0.4, label="QC-passed windows", color="#2f6f9f")
+        for x, (_, row) in zip(xs, sub.iterrows(), strict=True):
+            if row["beats (all)"]:
+                kept = row["beats (passed)"] / row["beats (all)"]
+                ax.text(
+                    x + 0.2,
+                    0.02,
+                    f"{kept:.0%}\nkept",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    color="white",
+                )
+        ax.set_xticks(xs, acts)
+        ax.set_title(det)
+        ax.set_ylim(0, 1.02)
+        ax.grid(axis="y", alpha=0.3)
+    axes[0][0].set_ylabel("F1 vs annotated beats")
+    axes[0][-1].legend(loc="lower right", fontsize=8)
+    fig.suptitle(title, fontsize=10)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
 def write_figures(r: dict[str, Any]) -> list[Path]:
     import matplotlib
 
@@ -233,29 +275,12 @@ def write_figures(r: dict[str, Any]) -> list[Path]:
     out: list[Path] = []
     summary = r["summary"]
     if not summary.empty:
-        gt = gating_table(summary)
-        gt = gt[gt["activity"] != "all"] if (gt["activity"] != "all").any() else gt
-        dets = list(dict.fromkeys(gt["detector"]))
-        acts = list(dict.fromkeys(gt["activity"]))
-        fig, axes = plt.subplots(
-            1, len(dets), figsize=(3.2 * len(dets) + 1, 3.4), sharey=True, squeeze=False
-        )
-        for ax, det in zip(axes[0], dets, strict=True):
-            sub = gt[gt["detector"] == det].set_index("activity").reindex(acts)
-            xs = np.arange(len(acts))
-            ax.bar(xs - 0.2, sub["F1 (all)"], 0.4, label="all windows", color="#9aa5b1")
-            ax.bar(xs + 0.2, sub["F1 (passed)"], 0.4, label="QC-passed windows", color="#2f6f9f")
-            ax.set_xticks(xs, acts)
-            ax.set_title(det)
-            ax.set_ylim(0, 1.02)
-            ax.grid(axis="y", alpha=0.3)
-        axes[0][0].set_ylabel("F1 vs annotated beats")
-        axes[0][-1].legend(loc="lower right", fontsize=8)
-        fig.suptitle("Beat detection F1 by activity, with and without quality gating", fontsize=10)
-        fig.tight_layout()
         p = d / "fig_f1_by_activity.png"
-        fig.savefig(p, dpi=130)
-        plt.close(fig)
+        f1_bar_figure(
+            gating_table(summary),
+            p,
+            "Beat detection F1 by activity, with and without quality gating (in-sample)",
+        )
         out.append(p)
     ex = r.get("example")
     if ex:

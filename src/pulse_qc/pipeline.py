@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -55,12 +56,15 @@ class RecordSpec:
     channel: str
     annotator: str | None
     activity: str | None = None
+    subject: str | None = None
 
 
 def record_specs(cfg: dict[str, Any]) -> list[RecordSpec]:
     specs = []
     for group in cfg["data"]["records"]:
+        pattern = re.compile(group.get("subject_pattern", r"^([^_]+)"))
         for name in group["names"]:
+            m = pattern.search(name)
             specs.append(
                 RecordSpec(
                     group["db"],
@@ -68,6 +72,7 @@ def record_specs(cfg: dict[str, Any]) -> list[RecordSpec]:
                     group.get("channel", "signal"),
                     group.get("annotator"),
                     group.get("activity"),
+                    m.group(1) if m else name,
                 )
             )
     return specs
@@ -255,7 +260,7 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
         rid = rec.record_id
         y, pre_key = _preprocess(rec, load_key, cfg, cache)
         qc_df, windows, qc_key = _qc(rec, load_key, cfg, cache)
-        qc_df = qc_df.assign(record=rid, activity=activity)
+        qc_df = qc_df.assign(record=rid, subject=spec.subject, activity=activity)
         qc_frames.append(qc_df)
         rec_rows.append(
             {
@@ -265,6 +270,7 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
                 "channel": rec.channel,
                 "fs": rec.fs,
                 "duration_s": rec.duration_s,
+                "subject": spec.subject,
                 "activity": activity,
                 "n_annotated_beats": int(len(rec.ann_samples))
                 if rec.ann_samples is not None
@@ -295,7 +301,9 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
             )
             counts = counts.merge(qc_df[["window", "passed", "reasons"]], on="window", how="left")
             counts["passed"] = counts["passed"].astype("boolean")
-            counts = counts.assign(record=rid, activity=activity, detector=det_cfg["name"])
+            counts = counts.assign(
+                record=rid, subject=spec.subject, activity=activity, detector=det_cfg["name"]
+            )
             count_frames.append(counts)
             det_row["lag_s"] = lag
             det_row["abs_err_ms_median"] = float(counts["abs_err_ms_median"].iloc[0])
@@ -319,7 +327,17 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
         pd.concat(count_frames, ignore_index=True)
         if count_frames
         else pd.DataFrame(
-            columns=["record", "activity", "detector", "window", "passed", "tp", "fn", "fp"]
+            columns=[
+                "record",
+                "subject",
+                "activity",
+                "detector",
+                "window",
+                "passed",
+                "tp",
+                "fn",
+                "fp",
+            ]
         )
     )
     lags = pd.DataFrame(

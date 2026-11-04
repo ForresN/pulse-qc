@@ -24,9 +24,10 @@ qc:
     - {name: flatline, max_flat_s: 0.5}
     - {name: clipping, max_frac: 0.02, min_run: 3, rel_tol: 0.001}
     - {name: plausible_range, lo: 1, hi: 262143}   # MAX30101 is an 18-bit ADC; 0 means no light
-    # Signal-quality heuristic, not an acquisition fault. Threshold 0.5 was chosen by looking at
-    # these same six subjects (see README, Limits), so gated scores are optimistic.
-    - {name: periodicity, min_acf: 0.5, lag_range_s: [0.3, 2.0]}
+    # Signal-quality heuristic, not an acquisition fault. 0.65 is the median of the thresholds
+    # chosen by leave-one-subject-out on these six subjects (`pulse-qc holdout`); the gated
+    # scores in report.md are therefore in-sample, and holdout.md has the held-out ones.
+    - {name: periodicity, min_acf: 0.65, lag_range_s: [0.3, 2.0]}
 detectors:
   - {name: elgendi}
   - {name: msptd}
