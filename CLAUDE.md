@@ -16,7 +16,8 @@ Read `README.md` first; this file is only what is not obvious from it.
   the 254k-sample records. `elgendi` and `charlton` (MSPTD) are fine.
 - **Raw MAX30101 PPG in PTT-PPG dips at systole**: `preprocess.invert: true` in that config.
   BIDMC `PLETH` is already upright.
-- Thresholds for `periodicity` and `motion` in `configs/ptt-ppg.yaml` are the leave-one-subject-out
+- `configs/ptt-ppg.yaml` is the default (acquisition rules + `periodicity`); `ptt-ppg-motion.yaml`
+  adds `motion` and the IMU `aux_channels` for the comparison. Thresholds are the leave-one-subject-out
   consensus from `pulse-qc holdout`; the README quotes the held-out numbers, `report.md` is
   in-sample. Rerun `holdout` after touching either rule. The motion candidate grid is log-spaced
   because walking and running differ by an order of magnitude in g.

@@ -1,5 +1,7 @@
 # PhysioNet Pulse Transit Time PPG (ODbL 1.0): infrared finger PPG at 500 Hz with
 # manually verified ECG R-peak annotations. Subjects 1-6, three activities each.
+# This is the default: acquisition-fault rules plus the periodicity heuristic. The
+# accelerometer-based motion rule lives in ptt-ppg-motion.yaml so the two can be compared.
 name: ptt-ppg
 data:
   raw_dir: data/raw
@@ -8,7 +10,6 @@ data:
     - db: pulse-transit-time-ppg
       channel: pleth_2          # infrared, distal phalanx (per the dataset README channel list)
       annotator: atr            # manually verified R peaks
-      aux_channels: [a_x, a_y, a_z]   # IMU accelerometer (g, 500 Hz), used by the motion rule
       names: [s1_sit, s1_walk, s1_run, s2_sit, s2_walk, s2_run, s3_sit, s3_walk, s3_run,
               s4_sit, s4_walk, s4_run, s5_sit, s5_walk, s5_run, s6_sit, s6_walk, s6_run]
 preprocess:
@@ -29,9 +30,6 @@ qc:
     # chosen by leave-one-subject-out on these six subjects (`pulse-qc holdout`); the gated
     # scores in report.md are therefore in-sample, and holdout.md has the held-out ones.
     - {name: periodicity, min_acf: 0.65, lag_range_s: [0.3, 2.0]}
-    # Motion from the accelerometer: std of |a| over the window, in g. Threshold likewise from
-    # `pulse-qc holdout --rule motion`; see holdout.md for the held-out comparison.
-    - {name: motion, channels: [a_x, a_y, a_z], max_std_g: 0.5}
 detectors:
   - {name: elgendi}
   - {name: msptd}

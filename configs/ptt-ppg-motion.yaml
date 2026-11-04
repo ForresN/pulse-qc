@@ -1,0 +1,46 @@
+# PhysioNet Pulse Transit Time PPG (ODbL 1.0): infrared finger PPG at 500 Hz with
+# manually verified ECG R-peak annotations. Subjects 1-6, three activities each.
+# Same as ptt-ppg.yaml plus the accelerometer-based motion rule. Both heuristics are in one
+# run so that `pulse-qc holdout <run> --rule periodicity --rule motion` can compare them on
+# the same windows. In-sample this gate keeps well under half of the windows; see README.
+name: ptt-ppg-motion
+data:
+  raw_dir: data/raw
+  verify_checksums: true
+  records:
+    - db: pulse-transit-time-ppg
+      channel: pleth_2          # infrared, distal phalanx (per the dataset README channel list)
+      annotator: atr            # manually verified R peaks
+      aux_channels: [a_x, a_y, a_z]   # IMU accelerometer (g, 500 Hz), used by the motion rule
+      names: [s1_sit, s1_walk, s1_run, s2_sit, s2_walk, s2_run, s3_sit, s3_walk, s3_run,
+              s4_sit, s4_walk, s4_run, s5_sit, s5_walk, s5_run, s6_sit, s6_walk, s6_run]
+preprocess:
+  invert: true                  # raw reflectance PPG dips at systole; flip so peaks point up
+  band_hz: [0.5, 8.0]
+  order: 3
+windows:
+  length_s: 10
+qc:
+  version: 1
+  rules:
+    - {name: nan_dropout, max_frac: 0.01}
+    - {name: sampling_gap, max_gap_s: 0.2}
+    - {name: flatline, max_flat_s: 0.5}
+    - {name: clipping, max_frac: 0.02, min_run: 3, rel_tol: 0.001}
+    - {name: plausible_range, lo: 1, hi: 262143}   # MAX30101 is an 18-bit ADC; 0 means no light
+    # Signal-quality heuristic, not an acquisition fault. 0.65 is the median of the thresholds
+    # chosen by leave-one-subject-out on these six subjects (`pulse-qc holdout`); the gated
+    # scores in report.md are therefore in-sample, and holdout.md has the held-out ones.
+    - {name: periodicity, min_acf: 0.65, lag_range_s: [0.3, 2.0]}
+    # Motion from the accelerometer: std of |a| over the window, in g. 0.5 is the median of
+    # the leave-one-subject-out thresholds; see holdout.md for the held-out comparison.
+    - {name: motion, channels: [a_x, a_y, a_z], max_std_g: 0.5}
+detectors:
+  - {name: elgendi}
+  - {name: msptd}
+  - {name: prominence, min_rr_s: 0.3, prominence_sd: 0.5}
+evaluation:
+  tolerance_ms: 100
+  lag_search_ms: [0, 600]
+output_dir: runs
+cache_dir: cache

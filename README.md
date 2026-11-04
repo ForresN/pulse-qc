@@ -90,17 +90,18 @@ jitter.
 
 ![Held-out F1 by activity, with and without quality gating](docs/fig_f1_heldout_periodicity.png)
 
-The shipped `configs/ptt-ppg.yaml` applies both heuristics at their held-out consensus
-thresholds so that they can be compared on one run; in-sample that keeps 342 of 891
-windows and scores F1 0.985 on them. Each run's `report.md` is the in-sample view;
-`pulse-qc holdout <run>` writes the held-out one.
+The default `configs/ptt-ppg.yaml` is the acquisition rules plus `periodicity` at the
+held-out consensus threshold of 0.65; in-sample that keeps 655 of 891 windows and scores
+F1 0.971 on them. Each run's `report.md` is the in-sample view; `pulse-qc holdout <run>`
+writes the held-out one.
 
 ### Does motion explain the errors better than periodicity?
 
 The PTT-PPG device carries an accelerometer, so there is a second, independent way to
 gate: a `motion` rule that fails a window when the standard deviation of the acceleration
-magnitude exceeds a threshold. Same windows, same beats, same leave-one-subject-out
-protocol. AUC is how well the raw rule value ranks the bad windows (mean beat F1 below
+magnitude exceeds a threshold. `configs/ptt-ppg-motion.yaml` adds it to the default
+config so that both rules are measured on one run, and `pulse-qc holdout` compares them.
+Same windows, same beats, same leave-one-subject-out protocol. AUC is how well the raw rule value ranks the bad windows (mean beat F1 below
 0.9) within that activity.
 
 | activity | AUC motion | AUC periodicity | F1 all | F1 passed (motion) | beats kept | F1 passed (periodicity) | beats kept |
@@ -166,10 +167,12 @@ uv run pulse-qc run configs/synthetic.yaml     # end-to-end on generated signals
 
 # Real data: downloads ~90 MB from PhysioNet into data/raw/ (git-ignored),
 # verifies every file against the published SHA256SUMS, and caches each stage.
-uv run pulse-qc run configs/ptt-ppg.yaml
-uv run pulse-qc holdout runs/ptt-ppg-<hash> --rule periodicity --rule motion
+uv run pulse-qc run configs/ptt-ppg.yaml       # default: acquisition rules + periodicity
+uv run pulse-qc holdout runs/ptt-ppg-<hash>    # leave-one-subject-out threshold, held-out scores
+uv run pulse-qc run configs/ptt-ppg-motion.yaml                     # adds the motion rule
+uv run pulse-qc holdout runs/ptt-ppg-motion-<hash> --rule periodicity --rule motion
+uv run pulse-qc compare configs/ptt-ppg.yaml configs/ptt-ppg-motion.yaml
 uv run pulse-qc run configs/charis.yaml        # streams 3 x 2 h of ICP/ABP, ~5 MB total
-uv run pulse-qc compare configs/ptt-ppg-acquisition-only.yaml configs/ptt-ppg.yaml
 uv run pulse-qc report runs/ptt-ppg-<hash>     # regenerate report.md and figures
 ```
 
