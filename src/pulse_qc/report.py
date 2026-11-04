@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from pulse_qc.qc.rules import RULES_VERSION
+
 
 def load_run(run_dir: Path) -> dict[str, Any]:
     d = Path(run_dir)
@@ -130,7 +132,8 @@ def write_report(run_dir: Path, figures: bool = True) -> Path:
     n_w, n_p = len(wq), int(wq["passed"].astype(bool).sum())
     md.append(
         f"{n_p} of {n_w} windows of {cfg['windows']['length_s']} s passed all rules "
-        f"({n_p / n_w:.1%}). Rules (version {cfg['qc'].get('version', 1)}):"
+        f"({n_p / n_w:.1%}). Rules (config version {cfg['qc'].get('version', 1)}, "
+        f"rules code version {RULES_VERSION}):"
     )
     md.append("")
     for rule in cfg["qc"]["rules"]:
@@ -261,7 +264,12 @@ def write_figures(r: dict[str, Any]) -> list[Path]:
         windows = ex["windows"]
         qc = r["window_qc"]
         qc = qc[qc["record"] == ex["record"]].reset_index(drop=True)
-        t0, t1 = 0.0, min(60.0, len(x) / fs)
+        span = 60.0
+        t0 = 0.0
+        failed = qc.index[~qc["passed"].astype(bool)]
+        if len(failed):  # centre the plot on the first failed window
+            t0 = max(0.0, float(qc.loc[failed[0], "start_s"]) - span / 2)
+        t1 = min(t0 + span, len(x) / fs)
         sl = slice(int(t0 * fs), int(t1 * fs))
         t = np.arange(sl.start, sl.stop) / fs
         fig, ax = plt.subplots(figsize=(11, 3.2))
@@ -270,6 +278,8 @@ def write_figures(r: dict[str, Any]) -> list[Path]:
             if a / fs >= t1:
                 break
             passed = bool(qc.loc[i, "passed"]) if i < len(qc) else True
+            if b / fs <= t0:
+                continue
             ax.axvspan(a / fs, b / fs, color="#2f6f9f" if passed else "#c0392b", alpha=0.08)
         ann = ex["annotations"]
         if len(ann):
@@ -280,16 +290,17 @@ def write_figures(r: dict[str, Any]) -> list[Path]:
                 color="#c0392b",
                 lw=0.5,
                 alpha=0.6,
-                label="reference beats",
+                label="reference beats (ECG R)",
             )
         dets = {k[4:]: v for k, v in ex.items() if k.startswith("det_")}
         if dets:
             name, pk = next(iter(dets.items()))
             m = (pk >= sl.start) & (pk < sl.stop)
             ax.plot(pk[m] / fs, x[pk[m]], "o", ms=3, color="#2f6f9f", label=f"{name} peaks")
+        ax.set_xlim(t0, t1)
         ax.set_xlabel("time (s)")
         ax.set_title(
-            f"{ex['record']}: first {t1:.0f} s, windows shaded blue = QC pass, red = QC fail",
+            f"{ex['record']}: {t0:.0f}–{t1:.0f} s, windows shaded blue = QC pass, red = QC fail",
             fontsize=9,
         )
         ax.legend(loc="upper right", fontsize=7, ncol=3)
@@ -350,6 +361,11 @@ def _diff_dict(a: Any, b: Any, prefix: str = "") -> list[str]:
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a) | set(b)):
             out.extend(_diff_dict(a.get(k), b.get(k), f"{prefix}{k}."))
+    elif isinstance(a, list) and isinstance(b, list):
+        for i in range(max(len(a), len(b))):
+            ai = a[i] if i < len(a) else None
+            bi = b[i] if i < len(b) else None
+            out.extend(_diff_dict(ai, bi, f"{prefix}{i}."))
     elif a != b:
         out.append(f"- `{prefix.rstrip('.')}`: `{a}` → `{b}`")
     return out

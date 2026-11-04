@@ -300,8 +300,10 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
             det_row["lag_s"] = lag
             det_row["abs_err_ms_median"] = float(counts["abs_err_ms_median"].iloc[0])
             lag_rows.append(det_row)
-        if not examples:
+        has_fail = not bool(qc_df["passed"].all())
+        if not examples or (has_fail and not examples.get("has_fail")):
             examples = {
+                "has_fail": has_fail,
                 "record": rid,
                 "fs": rec.fs,
                 "signal": rec.signal,

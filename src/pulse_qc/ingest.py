@@ -126,9 +126,11 @@ def read_record(
 
     rec_path = str(raw_dir / db / name)
     header = wfdb.rdheader(rec_path)
-    if channel not in header.sig_name:
-        raise KeyError(f"channel {channel!r} not in {db}/{name}: {header.sig_name}")
-    idx = header.sig_name.index(channel)
+    # Some headers carry stray punctuation in signal names (BIDMC has "PLETH,").
+    sig_names = [n.strip(", ") for n in header.sig_name]
+    if channel not in sig_names:
+        raise KeyError(f"channel {channel!r} not in {db}/{name}: {sig_names}")
+    idx = sig_names.index(channel)
     rec = wfdb.rdrecord(rec_path, channels=[idx])
     signal = np.asarray(rec.p_signal[:, 0], dtype=float)
 

@@ -7,7 +7,7 @@ data:
   verify_checksums: true
   records:
     - db: bidmc
-      channel: "PLETH,"          # the channel name in the WFDB header carries a trailing comma
+      channel: PLETH
       annotator: null
       activity: icu
       names: [bidmc01, bidmc02, bidmc03, bidmc04, bidmc05]
