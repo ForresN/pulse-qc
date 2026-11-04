@@ -1,0 +1,17 @@
+# data and run outputs (PhysioNet data is never committed)
+data/
+cache/
+runs/
+# python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+# editors / os
+.DS_Store
+.idea/
+.vscode/
