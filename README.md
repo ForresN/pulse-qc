@@ -30,9 +30,14 @@ a product.
 - **Reference beats are ECG R-peaks, not PPG peaks.** The scorer removes one constant
   lag per record (the median R-to-pulse delay, about 0.3 s here) and then matches within
   ±100 ms. Beat-to-beat changes in pulse arrival time count against the detector.
-- **No cerebral signals yet.** The datasets have no cerebral blood flow or ICP; the link to
-  neuro-monitoring is the shared problem (pulsatile waveforms, trust before metrics), not
-  the signal.
+- **The neuro-ICU part is a pattern demonstration, not an index.** The ICP–ABP moving
+  correlation in the CHARIS run is a textbook PRx-*style* calculation on 50 Hz data with a
+  naive quality gate. It is not the validated clinical PRx, it is computed on 2-hour
+  segments of three patients, and the ICP sub-peaks (P1/P2/P3) are not resolvable at this
+  sampling rate. No clinical meaning should be read into any number in that section.
+- **No cerebral blood flow signal.** The datasets have ICP and ABP but no CBF; the link to
+  optical brain monitoring is the shared problem (pulsatile waveforms, trust before
+  metrics), not the signal.
 
 ## Results from a real run
 
@@ -74,6 +79,30 @@ A second config (`configs/bidmc.yaml`) runs the same rules and detectors on five
 ICU PPG records, which have no beat annotations: there the acquisition rules do fire
 (clipping and flatline on a couple of windows) and the report shows detection counts only.
 
+### Neuro-ICU waveforms (CHARIS, non-clinical)
+
+`configs/charis.yaml` streams a 2-hour segment of ICP and ABP from three CHARIS neuro-ICU
+records (about 1.5 MB each over HTTP range requests, no 70 MB downloads), gates each
+channel with its own plausible range, then computes per-beat pulse amplitude and a
+PRx-style moving ICP–ABP correlation (Pearson r of 10 s means over 5-minute blocks,
+stepped by 1 minute) in which a block is only valid if at least 80% of its windows passed
+QC on *both* channels.
+
+| record (2 h segment) | ICP windows passed | ABP windows passed | median ICP (mmHg) | median ICP pulse amp (mmHg) | valid correlation blocks | median r |
+|---|---|---|---|---|---|---|
+| charis1 | 330 / 720 | 639 / 720 | 13.5 | 1.30 | 0 / 116 | – |
+| charis4 | 713 / 720 | 686 / 720 | 20.7 | 3.37 | 115 / 116 | 0.11 |
+| charis7 | 720 / 720 | 720 / 720 | 15.4 | 4.45 | 116 / 116 | 0.07 |
+
+The first row is the point of the exercise. In charis1 the ICP pulse is about 1.3 mmHg and
+irregular, the periodicity gate rejected more than half of the ICP windows, and so no
+5-minute block had enough clean data on both channels: the harness returns no correlation
+rather than a dubious one. The ABP channel in that record also carried two windows outside
+20–250 mmHg (a flushed or disconnected line reads near zero), which the plausible-range
+rule caught.
+
+![charis4: ICP and ABP envelopes with QC shading, ICP pulse amplitude per beat, and the moving ICP–ABP correlation](docs/fig_neuro_charis4.png)
+
 The full tables, provenance JSON (git SHA, package versions, config hash, record IDs and
 file checksums) and figures for every run are written to `runs/<name>-<confighash>/`.
 
@@ -90,6 +119,7 @@ uv run pulse-qc run configs/synthetic.yaml     # end-to-end on generated signals
 # Real data: downloads ~90 MB from PhysioNet into data/raw/ (git-ignored),
 # verifies every file against the published SHA256SUMS, and caches each stage.
 uv run pulse-qc run configs/ptt-ppg.yaml
+uv run pulse-qc run configs/charis.yaml        # streams 3 x 2 h of ICP/ABP, ~5 MB total
 uv run pulse-qc compare configs/ptt-ppg-acquisition-only.yaml configs/ptt-ppg.yaml
 uv run pulse-qc report runs/ptt-ppg-<hash>     # regenerate report.md and figures
 uv run pulse-qc holdout runs/ptt-ppg-<hash>    # leave-one-subject-out threshold + held-out scores
@@ -103,8 +133,9 @@ load  ->  preprocess  ->  detect (x3)  ->  evaluate (x3)
 ```
 
 - **Ingest** (`ingest.py`): fetches only the named WFDB files, checks them against the
-  dataset's `SHA256SUMS.txt`, reads one channel plus the beat annotations. Demographic
-  header fields are dropped on read.
+  dataset's `SHA256SUMS.txt`, reads one channel plus the beat annotations and any
+  auxiliary channels a rule needs. Long records can be streamed as a time segment over
+  HTTP range requests instead of downloaded. Demographic header fields are dropped on read.
 - **QC rules** (`qc/rules.py`): pure functions of one window and the sampling rate,
   registered by name, parametrised from YAML. `nan_dropout`, `sampling_gap`, `flatline`,
   `clipping`, `plausible_range`, `periodicity`. Each returns pass/fail, the value the
@@ -122,7 +153,9 @@ load  ->  preprocess  ->  detect (x3)  ->  evaluate (x3)
 - **Evaluation** (`evaluate.py`): per-record lag estimate, greedy one-to-one matching
   within a tolerance, counts attributed per window so the same detections can be scored
   over all windows, QC-passed windows, or by activity.
-- **Report** (`report.py`): Markdown, two figures, `provenance.json`.
+- **Neuro features** (`neuro.py`): per-beat pulse amplitude and the masked moving ICP–ABP
+  correlation, paired by record name, cached like every other stage.
+- **Report** (`report.py`): Markdown, figures, `provenance.json`.
 - **Hold-out** (`holdout.py`): leave-one-subject-out choice of a rule's threshold (Youden's J
   for flagging windows whose beat F1 is below 0.9), scored on the held-out subjects only.
 
@@ -144,6 +177,13 @@ Mehrgardt, P., Khushi, M., Poon, S., & Withana, A. (2022). Pulse Transit Time PP
 (`window_qc.csv`, `beat_counts.csv`, `lags.csv`, `summary.csv`) are derived from an ODbL
 database. If you publish them, they are available under ODbL 1.0; the summary numbers
 reproduced in this README are likewise offered under ODbL 1.0. They are not committed here.
+
+**CHARIS database** (v1.0.0), licensed under ODC-By 1.0. Kim, N., Krasner, A., Kosinski,
+C., Wininger, M., Qadri, M., Kappus, Z., Danish, S., & Craelius, W. (2016). Trending
+autoregulatory indices during treatment for traumatic brain injury. Journal of Clinical
+Monitoring and Computing, 30(6), 821–831. https://doi.org/10.1007/s10877-015-9779-3.
+Only 2-hour segments of three records are read; demographic and outcome fields in the
+headers are discarded at ingest and nothing is joined to them.
 
 **BIDMC PPG and Respiration Dataset** (v1.0.0), licensed under the
 [Open Data Commons Attribution License v1.0 (ODC-By)](https://opendatacommons.org/licenses/by/1-0/).
@@ -169,7 +209,5 @@ licences as above.
 
 ## Next
 
-- CHARIS (ICP/ABP/ECG, 50 Hz, ODC-By) with the same QC overlays and a naive moving
-  ICP–ABP correlation, clearly labelled as non-clinical.
 - Rules that use auxiliary channels (the PTT-PPG set has an IMU; motion is what actually
   breaks these windows).

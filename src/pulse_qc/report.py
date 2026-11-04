@@ -28,6 +28,9 @@ def load_run(run_dir: Path) -> dict[str, Any]:
     if (d / "example.npz").exists():
         out["example"] = dict(np.load(d / "example.npz"))
         out["example"].update(json.loads((d / "example.json").read_text()))
+    from pulse_qc import neuro as neuro_mod
+
+    out["neuro"] = neuro_mod.load(d)
     return out
 
 
@@ -192,6 +195,46 @@ def write_report(run_dir: Path, figures: bool = True) -> Path:
             )
         )
         md.append("")
+    if r.get("neuro"):
+        ns = r["neuro"]["summary"]
+        md.append("## Neuro-ICU waveform features (non-clinical)")
+        md.append("")
+        md.append(
+            "Per-beat pulse amplitude (peak minus preceding trough) and a naive moving ICP–ABP "
+            "correlation: Pearson r of consecutive 10 s means over a 5-minute block, advanced "
+            "by 1 minute, with any window that failed QC on *either* channel masked before "
+            "averaging. This is a PRx-*style* index for demonstration, not the validated "
+            "clinical PRx, and no clinical meaning should be read into it."
+        )
+        md.append("")
+        md.append(
+            _md_table(
+                ns,
+                [
+                    "record",
+                    "n_windows",
+                    "windows_both_passed",
+                    "icp_mean_mmHg_median",
+                    "abp_mean_mmHg_median",
+                    "icp_pulse_amp_median",
+                    "abp_pulse_amp_median",
+                    "corr_blocks_valid",
+                    "n_corr_blocks",
+                    "corr_median",
+                ],
+                {
+                    "n_windows": str,
+                    "windows_both_passed": str,
+                    "corr_blocks_valid": str,
+                    "n_corr_blocks": str,
+                    "icp_mean_mmHg_median": lambda v: f"{v:.1f}",
+                    "abp_mean_mmHg_median": lambda v: f"{v:.1f}",
+                    "icp_pulse_amp_median": lambda v: f"{v:.2f}",
+                    "abp_pulse_amp_median": lambda v: f"{v:.1f}",
+                },
+            )
+        )
+        md.append("")
     md.append("## Cache")
     md.append("")
     cs = r["cache_stages"]
@@ -258,9 +301,10 @@ def f1_bar_figure(gt: pd.DataFrame, path: Path, title: str) -> None:
         ax.set_ylim(0, 1.02)
         ax.grid(axis="y", alpha=0.3)
     axes[0][0].set_ylabel("F1 vs annotated beats")
-    axes[0][-1].legend(loc="lower right", fontsize=8)
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=2, fontsize=8, frameon=False)
     fig.suptitle(title, fontsize=10)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
     fig.savefig(path, dpi=130)
     plt.close(fig)
 
@@ -282,6 +326,13 @@ def write_figures(r: dict[str, Any]) -> list[Path]:
             "Beat detection F1 by activity, with and without quality gating (in-sample)",
         )
         out.append(p)
+    if r.get("neuro"):
+        from pulse_qc import neuro as neuro_mod
+
+        for pair_id, feat in r["neuro"]["pairs"].items():
+            p = d / f"fig_neuro_{pair_id.replace('/', '__')}.png"
+            neuro_mod.figure(pair_id, feat, p)
+            out.append(p)
     ex = r.get("example")
     if ex:
         fs = float(ex["fs"])

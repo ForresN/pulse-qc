@@ -1,0 +1,62 @@
+# PhysioNet CHARIS (ODC-By 1.0): ICP, ABP and ECG at 50 Hz from neuro-ICU patients.
+# Records run for days, so a 2-hour segment of each is streamed over HTTP range requests
+# (about 1.5 MB per record) rather than downloading the 70 MB files. Segment offsets were
+# chosen by probing for a stretch where both ABP and ICP are live.
+# Nothing in this config is clinical: see README "Limits".
+name: charis
+data:
+  raw_dir: data/raw
+  records:
+    - &icp
+      db: charisdb
+      channel: ICP
+      activity: icu
+      names: [charis1]
+      segment: {start_s: 18000, duration_s: 7200}
+      qc:
+        version: 1
+        rules:
+          - {name: nan_dropout, max_frac: 0.01}
+          - {name: sampling_gap, max_gap_s: 0.2}
+          - {name: flatline, max_flat_s: 1.0}
+          - {name: clipping, max_frac: 0.02, min_run: 3, rel_tol: 0.001}
+          - {name: plausible_range, lo: -10, hi: 100, max_frac: 0.01}   # mmHg
+          - {name: periodicity, min_acf: 0.5, lag_range_s: [0.3, 2.0]}
+    - &abp
+      db: charisdb
+      channel: ABP
+      activity: icu
+      names: [charis1]
+      segment: {start_s: 18000, duration_s: 7200}
+      qc:
+        version: 1
+        rules:
+          - {name: nan_dropout, max_frac: 0.01}
+          - {name: sampling_gap, max_gap_s: 0.2}
+          - {name: flatline, max_flat_s: 1.0}
+          - {name: clipping, max_frac: 0.02, min_run: 3, rel_tol: 0.001}
+          - {name: plausible_range, lo: 20, hi: 250, max_frac: 0.01}    # mmHg; a flushed line reads ~0
+          - {name: periodicity, min_acf: 0.5, lag_range_s: [0.3, 2.0]}
+    - {<<: *icp, names: [charis4], segment: {start_s: 5400, duration_s: 7200}}
+    - {<<: *abp, names: [charis4], segment: {start_s: 5400, duration_s: 7200}}
+    - {<<: *icp, names: [charis7], segment: {start_s: 7200, duration_s: 7200}}
+    - {<<: *abp, names: [charis7], segment: {start_s: 7200, duration_s: 7200}}
+preprocess:
+  invert: false
+  band_hz: [0.5, 8.0]
+windows:
+  length_s: 10
+qc:                      # unused here: every group overrides with channel-specific ranges
+  version: 1
+  rules: []
+detectors:
+  - {name: prominence, min_rr_s: 0.3, prominence_sd: 0.5}
+  - {name: elgendi}
+neuro:
+  icp_channel: ICP
+  abp_channel: ABP
+  detector: prominence
+  corr_n: 30             # 30 x 10 s means = 5 min blocks
+  step_n: 6              # advance by 1 min
+output_dir: runs
+cache_dir: cache

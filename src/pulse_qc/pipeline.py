@@ -57,6 +57,13 @@ class RecordSpec:
     annotator: str | None
     activity: str | None = None
     subject: str | None = None
+    aux_channels: tuple[str, ...] = ()
+    segment: dict[str, float] | None = None
+    qc: dict[str, Any] | None = None  # per-group override of the top-level qc section
+
+    @property
+    def record_id(self) -> str:
+        return f"{self.db}/{self.name}:{self.channel}"
 
 
 def record_specs(cfg: dict[str, Any]) -> list[RecordSpec]:
@@ -73,6 +80,9 @@ def record_specs(cfg: dict[str, Any]) -> list[RecordSpec]:
                     group.get("annotator"),
                     group.get("activity"),
                     m.group(1) if m else name,
+                    tuple(group.get("aux_channels", [])),
+                    group.get("segment"),
+                    group.get("qc"),
                 )
             )
     return specs
@@ -81,11 +91,31 @@ def record_specs(cfg: dict[str, Any]) -> list[RecordSpec]:
 # --------------------------------------------------------------------------- stages
 
 
-def _synthetic_record(name: str) -> Record:
-    """Deterministic synthetic fixtures by name, for tests and CI."""
-    base = synth.synthetic_ppg(duration_s=60, fs=125, hr_bpm=72, seed=abs(hash(name)) % 1000)
+def _synthetic_record(name: str, channel: str = "signal", aux: tuple[str, ...] = ()) -> Record:
+    """Deterministic synthetic fixtures by name, for tests and CI.
+
+    ``channel`` "ICP"/"ABP" produce a slow-drifting pressure-like pair that share beats
+    (ABP = 80 + 20*pulse, ICP = 12 + 3*pulse plus a slow component correlated with ABP),
+    so the neuro stage can be tested. ``aux`` names ending in ``_x/_y/_z`` get a
+    synthetic accelerometer: quiet for the first half, shaking for the second."""
+    seed = sum(ord(c) for c in name) % 1000
+    base = synth.synthetic_ppg(duration_s=60, fs=125, hr_bpm=72, seed=seed)
     x = base.signal
     fs = base.fs
+    if channel in {"ICP", "ABP"}:
+        t = np.arange(len(x)) / fs
+        slow = np.sin(2 * np.pi * t / 20)  # shared slow wave -> positive ICP/ABP correlation
+        pulse = x - 1.0
+        x = (80 + 20 * pulse + 8 * slow) if channel == "ABP" else (12 + 3 * pulse + 2 * slow)
+    aux_data: dict[str, np.ndarray] = {}
+    rng = np.random.default_rng(seed + 1)
+    for a in aux:
+        quiet = rng.normal(0, 0.005, len(x))
+        shaking = rng.normal(0, 0.3, len(x))
+        half = len(x) // 2
+        aux_data[a] = np.where(np.arange(len(x)) < half, quiet, shaking) + (
+            1.0 if a.endswith("_z") else 0.0
+        )
     if name.startswith("dropout"):
         x = synth.inject_nan(x, int(12 * fs), int(15 * fs))
     elif name.startswith("flat"):
@@ -95,28 +125,50 @@ def _synthetic_record(name: str) -> Record:
     return Record(
         db="synthetic",
         name=name,
-        channel="signal",
+        channel=channel,
         fs=fs,
         signal=x,
         ann_samples=base.beat_samples,
         meta={"activity": "synthetic"},
-        source_sha256={name: hashlib.sha256(name.encode()).hexdigest()},
+        source_sha256={name: hashlib.sha256(f"{name}:{channel}".encode()).hexdigest()},
+        aux=aux_data,
+        units="mmHg" if channel in {"ICP", "ABP"} else "",
     )
 
 
 def _load(spec: RecordSpec, cfg: dict[str, Any], cache: Cache) -> tuple[Record, str]:
     """Return the record and its load key (which encodes the raw file hashes)."""
     if spec.db == "synthetic":
-        rec = _synthetic_record(spec.name)
+        rec = _synthetic_record(spec.name, spec.channel, spec.aux_channels)
         key = make_key(
             "load",
             source=json.dumps(rec.source_sha256, sort_keys=True),
             channel=spec.channel,
+            aux=",".join(spec.aux_channels),
             code=code_hash(synth, _synthetic_record),
         )
         return rec, key
     raw_dir = Path(cfg["data"].get("raw_dir", "data/raw"))
     verify = bool(cfg["data"].get("verify_checksums", True))
+    if spec.segment:
+        start_s, duration_s = float(spec.segment["start_s"]), float(spec.segment["duration_s"])
+        rec = ingest.read_segment(
+            spec.db,
+            spec.name,
+            spec.channel,
+            raw_dir,
+            start_s,
+            duration_s,
+            aux_channels=list(spec.aux_channels),
+        )
+        key = make_key(
+            "load",
+            source=json.dumps(rec.source_sha256, sort_keys=True),
+            channel=spec.channel,
+            aux=",".join(spec.aux_channels),
+            code=code_hash(ingest),
+        )
+        return rec, key
     files = [f"{spec.name}.hea", f"{spec.name}.dat"] + (
         [f"{spec.name}.{spec.annotator}"] if spec.annotator else []
     )
@@ -125,6 +177,7 @@ def _load(spec: RecordSpec, cfg: dict[str, Any], cache: Cache) -> tuple[Record, 
         "load",
         source=json.dumps(digests, sort_keys=True),
         channel=spec.channel,
+        aux=",".join(spec.aux_channels),
         annotator=spec.annotator or "",
         code=code_hash(ingest),
     )
@@ -132,7 +185,13 @@ def _load(spec: RecordSpec, cfg: dict[str, Any], cache: Cache) -> tuple[Record, 
         "load",
         key,
         lambda: ingest.read_record(
-            spec.db, spec.name, spec.channel, raw_dir, annotator=spec.annotator, verify=verify
+            spec.db,
+            spec.name,
+            spec.channel,
+            raw_dir,
+            annotator=spec.annotator,
+            verify=verify,
+            aux_channels=list(spec.aux_channels),
         ),
         meta={"record": f"{spec.db}/{spec.name}:{spec.channel}"},
     )
@@ -159,9 +218,9 @@ def _preprocess(
 
 
 def _qc(
-    rec: Record, load_key: str, cfg: dict[str, Any], cache: Cache
+    rec: Record, load_key: str, cfg: dict[str, Any], cache: Cache, qc_cfg: dict | None = None
 ) -> tuple[pd.DataFrame, np.ndarray, str]:
-    ruleset = RuleSet.from_config(cfg["qc"])
+    ruleset = RuleSet.from_config(qc_cfg or cfg["qc"])
     wcfg = cfg["windows"]
     key = make_key(
         "qc",
@@ -171,7 +230,9 @@ def _qc(
         code=code_hash(rules_mod, apply_rules),
     )
     windows = make_windows(len(rec.signal), rec.fs, float(wcfg["length_s"]), wcfg.get("step_s"))
-    df = cache.get_or_compute("qc", key, lambda: apply_rules(rec.signal, rec.fs, windows, ruleset))
+    df = cache.get_or_compute(
+        "qc", key, lambda: apply_rules(rec.signal, rec.fs, windows, ruleset, aux=rec.aux)
+    )
     return df, windows, key
 
 
@@ -242,6 +303,7 @@ class RunResult:
     records: list[dict[str, Any]]
     cache_summary: dict[str, dict[str, int]]
     examples: dict[str, Any] = field(default_factory=dict)
+    neuro: dict[str, Any] = field(default_factory=dict)
 
 
 def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = None) -> RunResult:
@@ -254,12 +316,13 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
 
     qc_frames, count_frames, lag_rows, rec_rows = [], [], [], []
     examples: dict[str, Any] = {}
+    loaded: dict[str, dict[str, Any]] = {}  # record_id -> pieces the neuro stage needs
     for spec in record_specs(cfg):
         rec, load_key = _load(spec, cfg, cache)
         activity = spec.activity or rec.meta.get("activity", "unknown")
         rid = rec.record_id
         y, pre_key = _preprocess(rec, load_key, cfg, cache)
-        qc_df, windows, qc_key = _qc(rec, load_key, cfg, cache)
+        qc_df, windows, qc_key = _qc(rec, load_key, cfg, cache, spec.qc)
         qc_df = qc_df.assign(record=rid, subject=spec.subject, activity=activity)
         qc_frames.append(qc_df)
         rec_rows.append(
@@ -277,6 +340,8 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
                 else None,
                 "n_windows": int(len(windows)),
                 "n_windows_passed": int(qc_df["passed"].sum()),
+                "units": rec.units,
+                "segment": spec.segment,
                 "source_sha256": rec.source_sha256,
             }
         )
@@ -308,6 +373,15 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
             det_row["lag_s"] = lag
             det_row["abs_err_ms_median"] = float(counts["abs_err_ms_median"].iloc[0])
             lag_rows.append(det_row)
+        loaded[rid] = {
+            "spec": spec,
+            "rec": rec,
+            "load_key": load_key,
+            "qc_df": qc_df,
+            "qc_key": qc_key,
+            "windows": windows,
+            "detections": detections,
+        }
         has_fail = not bool(qc_df["passed"].all())
         if not examples or (has_fail and not examples.get("has_fail")):
             examples = {
@@ -353,6 +427,11 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
         ],
     )
     summary = summarise_counts(beat_counts)
+    neuro_out: dict[str, Any] = {}
+    if cfg.get("neuro"):
+        from pulse_qc import neuro as neuro_mod
+
+        neuro_out = neuro_mod.run_stage(cfg, loaded, cache)
 
     result = RunResult(
         cfg,
@@ -365,6 +444,7 @@ def run(cfg: dict[str, Any], *, cache: Cache | None = None, root: Path | None = 
         rec_rows,
         cache.stage_summary(),
         examples,
+        neuro_out,
     )
     save_run(result)
     return result
@@ -420,6 +500,10 @@ def save_run(result: RunResult) -> None:
     from pulse_qc.provenance import provenance
 
     (d / "provenance.json").write_text(json.dumps(provenance(result), indent=2, default=str))
+    if result.neuro:
+        from pulse_qc import neuro as neuro_mod
+
+        neuro_mod.save(result.neuro, d)
     if result.examples:
         ex = result.examples
         np.savez_compressed(

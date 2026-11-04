@@ -42,6 +42,8 @@ class Record:
     ann_samples: np.ndarray | None = None
     meta: dict[str, str] = field(default_factory=dict)
     source_sha256: dict[str, str] = field(default_factory=dict)
+    aux: dict[str, np.ndarray] = field(default_factory=dict)
+    units: str = ""
 
     @property
     def record_id(self) -> str:
@@ -117,8 +119,10 @@ def read_record(
     raw_dir: Path,
     annotator: str | None = None,
     verify: bool = True,
+    aux_channels: list[str] | None = None,
 ) -> Record:
-    """Read one channel of a WFDB record (downloading it first if needed)."""
+    """Read one channel of a WFDB record (downloading it first if needed), plus any
+    ``aux_channels`` (same sampling rate) that rules may want, e.g. an accelerometer."""
     files = [f"{name}.hea", f"{name}.dat"]
     if annotator:
         files.append(f"{name}.{annotator}")
@@ -130,9 +134,15 @@ def read_record(
     sig_names = [n.strip(", ") for n in header.sig_name]
     if channel not in sig_names:
         raise KeyError(f"channel {channel!r} not in {db}/{name}: {sig_names}")
-    idx = sig_names.index(channel)
-    rec = wfdb.rdrecord(rec_path, channels=[idx])
+    wanted = [channel, *(aux_channels or [])]
+    missing = [c for c in wanted if c not in sig_names]
+    if missing:
+        raise KeyError(f"channels {missing} not in {db}/{name}: {sig_names}")
+    idx = [sig_names.index(c) for c in wanted]
+    rec = wfdb.rdrecord(rec_path, channels=idx)
     signal = np.asarray(rec.p_signal[:, 0], dtype=float)
+    aux = {c: np.asarray(rec.p_signal[:, i + 1], dtype=float) for i, c in enumerate(wanted[1:])}
+    units = str(rec.units[0]) if getattr(rec, "units", None) else ""
 
     ann_samples = None
     if annotator:
@@ -151,6 +161,81 @@ def read_record(
         ann_samples=ann_samples,
         meta=meta,
         source_sha256=digests,
+        aux=aux,
+        units=units,
+    )
+
+
+def read_segment(
+    db: str,
+    name: str,
+    channel: str,
+    raw_dir: Path,
+    start_s: float,
+    duration_s: float,
+    aux_channels: list[str] | None = None,
+) -> Record:
+    """Stream a time segment of a long WFDB record over HTTP range requests.
+
+    CHARIS records run for days (70 MB each), so instead of downloading whole files
+    the segment is fetched with ``wfdb.rdrecord(sampfrom, sampto)`` and cached as a
+    compressed ``.npz`` under ``raw_dir/<db>/segments/``. The record's provenance
+    hash is the SHA-256 of the cached samples, and the segment bounds are kept in
+    ``meta``. Whole-file checksum verification is not possible for a segment.
+    """
+    version = DATABASES[db]["version"]
+    wanted = [channel, *(aux_channels or [])]
+    seg_dir = raw_dir / db / "segments"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    tag = f"{name}__{int(start_s)}s+{int(duration_s)}s__{'_'.join(wanted)}"
+    path = seg_dir / f"{tag}.npz"
+    if not path.exists():
+        header = wfdb.rdheader(name, pn_dir=f"{db}/{version}")
+        sig_names = [n.strip(", ") for n in header.sig_name]
+        missing = [c for c in wanted if c not in sig_names]
+        if missing:
+            raise KeyError(f"channels {missing} not in {db}/{name}: {sig_names}")
+        fs = float(header.fs)
+        sampfrom = int(round(start_s * fs))
+        sampto = min(int(round((start_s + duration_s) * fs)), int(header.sig_len))
+        if sampto <= sampfrom:
+            raise ValueError(f"segment {start_s}s+{duration_s}s is outside {db}/{name}")
+        idx = [sig_names.index(c) for c in wanted]
+        rec = wfdb.rdrecord(
+            name, pn_dir=f"{db}/{version}", sampfrom=sampfrom, sampto=sampto, channels=idx
+        )
+        arrays = {c: np.asarray(rec.p_signal[:, i], dtype=np.float32) for i, c in enumerate(wanted)}
+        tmp = path.with_suffix(".tmp.npz")
+        np.savez_compressed(
+            tmp,
+            fs=fs,
+            sampfrom=sampfrom,
+            sampto=sampto,
+            units=str(rec.units[0]),
+            comments="\n".join(header.comments),
+            **arrays,
+        )
+        tmp.replace(path)
+    data = np.load(path)
+    fs = float(data["fs"])
+    meta = _parse_header_comments(str(data["comments"]).split("\n"))
+    meta.update(
+        {
+            "segment_start_s": str(int(data["sampfrom"]) / fs),
+            "segment_end_s": str(int(data["sampto"]) / fs),
+        }
+    )
+    return Record(
+        db=db,
+        name=name,
+        channel=channel,
+        fs=fs,
+        signal=np.asarray(data[channel], dtype=float),
+        ann_samples=None,
+        meta=meta,
+        source_sha256={path.name: sha256_file(path)},
+        aux={c: np.asarray(data[c], dtype=float) for c in wanted[1:]},
+        units=str(data["units"]),
     )
 
 

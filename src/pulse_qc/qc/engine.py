@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,8 +19,11 @@ class RuleSpec:
     name: str
     params: dict[str, Any] = field(default_factory=dict)
 
-    def run(self, x: np.ndarray, fs: float) -> RuleResult:
-        return RULES[self.name](x, fs, **self.params)
+    def run(self, x: np.ndarray, fs: float, aux: dict[str, np.ndarray] | None = None) -> RuleResult:
+        fn = RULES[self.name]
+        if "aux" in inspect.signature(fn).parameters:
+            return fn(x, fs, aux=aux or {}, **self.params)
+        return fn(x, fs, **self.params)
 
 
 @dataclass(frozen=True)
@@ -55,7 +59,11 @@ class RuleSet:
 
 
 def apply_rules(
-    signal: np.ndarray, fs: float, windows: np.ndarray, ruleset: RuleSet
+    signal: np.ndarray,
+    fs: float,
+    windows: np.ndarray,
+    ruleset: RuleSet,
+    aux: dict[str, np.ndarray] | None = None,
 ) -> pd.DataFrame:
     """Evaluate every rule on every window.
 
@@ -66,6 +74,7 @@ def apply_rules(
     rows = []
     for i, (start, stop) in enumerate(windows):
         x = signal[start:stop]
+        aux_w = {k: v[start:stop] for k, v in (aux or {}).items()}
         row: dict[str, Any] = {
             "window": i,
             "start_s": start / fs,
@@ -73,7 +82,7 @@ def apply_rules(
         }
         reasons = []
         for spec in ruleset.rules:
-            res = spec.run(x, fs)
+            res = spec.run(x, fs, aux_w)
             row[spec.name] = res.value
             if not res.passed:
                 reasons.append(f"{spec.name}: {res.reason}")

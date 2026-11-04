@@ -1,0 +1,29 @@
+# Synthetic ICP/ABP pair for testing the neuro stage without any download.
+name: synthetic-neuro
+data:
+  records:
+    - db: synthetic
+      channel: ICP
+      activity: synthetic
+      names: [pair_a, pair_b]
+    - db: synthetic
+      channel: ABP
+      activity: synthetic
+      names: [pair_a, pair_b]
+windows:
+  length_s: 5
+qc:
+  version: 1
+  rules:
+    - {name: nan_dropout, max_frac: 0.01}
+    - {name: plausible_range, lo: -10, hi: 250}
+detectors:
+  - {name: prominence}
+neuro:
+  icp_channel: ICP
+  abp_channel: ABP
+  detector: prominence
+  corr_n: 6
+  step_n: 2
+output_dir: runs
+cache_dir: cache
