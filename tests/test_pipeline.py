@@ -39,13 +39,13 @@ def test_run_produces_outputs_and_scores(first_run):
     assert per_rec["synthetic/clipped_a:signal"] == 0.0
     assert per_rec["synthetic/dropout_a:signal"] < 1.0
     # every stage ran once per record on a cold cache
-    assert all(v["misses"] == 5 and v["hits"] == 0 for v in r.cache_summary.values())
+    assert all(v["misses"] == 6 and v["hits"] == 0 for v in r.cache_summary.values())
 
 
 def test_second_run_is_all_cache_hits(first_run, cfg):
     root, _ = first_run
     r2 = run(cfg, root=root)
-    assert all(v["hits"] == 5 and v["misses"] == 0 for v in r2.cache_summary.values())
+    assert all(v["hits"] == 6 and v["misses"] == 0 for v in r2.cache_summary.values())
 
 
 def test_changed_qc_config_reruns_only_qc_and_evaluate(first_run, cfg):
@@ -54,11 +54,11 @@ def test_changed_qc_config_reruns_only_qc_and_evaluate(first_run, cfg):
     cfg2["qc"]["rules"][0]["max_frac"] = 0.5  # loosen nan_dropout
     r2 = run(cfg2, root=root)
     s = r2.cache_summary
-    assert s["preprocess"] == {"hits": 5, "misses": 0}
-    assert s["detect:elgendi"] == {"hits": 5, "misses": 0}
-    assert s["detect:prominence"] == {"hits": 5, "misses": 0}
-    assert s["qc"] == {"hits": 0, "misses": 5}
-    assert s["evaluate:elgendi"] == {"hits": 0, "misses": 5}
+    assert s["preprocess"] == {"hits": 6, "misses": 0}
+    assert s["detect:elgendi"] == {"hits": 6, "misses": 0}
+    assert s["detect:prominence"] == {"hits": 6, "misses": 0}
+    assert s["qc"] == {"hits": 0, "misses": 6}
+    assert s["evaluate:elgendi"] == {"hits": 0, "misses": 6}
     assert config_fingerprint(cfg2) != config_fingerprint(cfg)
     assert r2.run_dir != run(cfg, root=root).run_dir
 
@@ -69,10 +69,10 @@ def test_new_detector_reruns_only_that_detector(first_run, cfg):
     cfg2["detectors"].append({"name": "msptd"})
     r2 = run(cfg2, root=root)
     s = r2.cache_summary
-    assert s["detect:msptd"] == {"hits": 0, "misses": 5}
-    assert s["evaluate:msptd"] == {"hits": 0, "misses": 5}
-    assert s["detect:elgendi"] == {"hits": 5, "misses": 0}
-    assert s["qc"] == {"hits": 5, "misses": 0}
+    assert s["detect:msptd"] == {"hits": 0, "misses": 6}
+    assert s["evaluate:msptd"] == {"hits": 0, "misses": 6}
+    assert s["detect:elgendi"] == {"hits": 6, "misses": 0}
+    assert s["qc"] == {"hits": 6, "misses": 0}
 
 
 def test_changed_preprocess_reruns_detect_but_not_qc(first_run, cfg):
@@ -80,9 +80,9 @@ def test_changed_preprocess_reruns_detect_but_not_qc(first_run, cfg):
     cfg2 = copy.deepcopy(cfg)
     cfg2["preprocess"]["band_hz"] = [0.5, 6.0]
     s = run(cfg2, root=root).cache_summary
-    assert s["preprocess"]["misses"] == 5
-    assert s["detect:elgendi"]["misses"] == 5
-    assert s["qc"] == {"hits": 5, "misses": 0}
+    assert s["preprocess"]["misses"] == 6
+    assert s["detect:elgendi"]["misses"] == 6
+    assert s["qc"] == {"hits": 6, "misses": 0}
 
 
 def test_output_dir_does_not_affect_fingerprint(cfg):
@@ -110,7 +110,7 @@ def test_cli_run_and_report(tmp_path):
     runner = CliRunner()
     res = runner.invoke(app, ["run", str(CONFIG), "--root", str(tmp_path), "--no-figures"])
     assert res.exit_code == 0, res.output
-    assert "misses=5" in res.output and "F1=" in res.output
+    assert "misses=6" in res.output and "F1=" in res.output
     run_dir = next((tmp_path / "runs").iterdir())
     res = runner.invoke(app, ["report", str(run_dir), "--no-figures"])
     assert res.exit_code == 0, res.output
@@ -135,4 +135,4 @@ def test_cli_compare(tmp_path):
 def test_cache_object_can_be_shared(cfg, tmp_path):
     cache = Cache(tmp_path / "c")
     run(cfg, cache=cache, root=tmp_path)
-    assert cache.stage_summary()["qc"]["misses"] == 5
+    assert cache.stage_summary()["qc"]["misses"] == 6

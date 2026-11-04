@@ -6,6 +6,7 @@ from pulse_qc.qc.rules import (
     _longest_run,
     clipping,
     flatline,
+    motion,
     nan_dropout,
     periodicity,
     plausible_range,
@@ -31,6 +32,7 @@ def test_registry_lists_every_rule():
         "clipping",
         "plausible_range",
         "periodicity",
+        "motion",
     }
 
 
@@ -157,3 +159,30 @@ class TestPeriodicity:
         t = np.arange(0, 10, 1 / FS)
         y = np.sin(2 * np.pi * 0.2 * t)  # 12 beats/min: too slow to be a pulse
         assert not periodicity(y, FS, lag_range_s=(0.3, 2.0)).passed
+
+
+class TestMotion:
+    def _aux(self, sd, n=1000, seed=0):
+        rng = np.random.default_rng(seed)
+        return {
+            "a_x": rng.normal(0, sd, n),
+            "a_y": rng.normal(0, sd, n),
+            "a_z": 1.0 + rng.normal(0, sd, n),
+        }
+
+    def test_still_passes_and_shaking_fails(self):
+        x = np.zeros(1000)
+        assert motion(x, FS, aux=self._aux(0.005), max_std_g=0.1).passed
+        r = motion(x, FS, aux=self._aux(0.3), max_std_g=0.1)
+        assert not r.passed and "motion" in r.reason and r.value > 0.1
+
+    def test_orientation_independent(self):
+        aux = self._aux(0.005)
+        rotated = {"a_x": aux["a_z"], "a_y": aux["a_x"], "a_z": aux["a_y"]}
+        a = motion(np.zeros(1000), FS, aux=aux).value
+        b = motion(np.zeros(1000), FS, aux=rotated).value
+        assert a == pytest.approx(b)
+
+    def test_missing_channel_fails_loudly(self):
+        r = motion(np.zeros(10), FS, aux={"a_x": np.zeros(10)})
+        assert not r.passed and "missing" in r.reason and np.isnan(r.value)

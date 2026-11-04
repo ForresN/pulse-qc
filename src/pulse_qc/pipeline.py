@@ -112,7 +112,7 @@ def _synthetic_record(name: str, channel: str = "signal", aux: tuple[str, ...] =
     for a in aux:
         quiet = rng.normal(0, 0.005, len(x))
         shaking = rng.normal(0, 0.3, len(x))
-        half = len(x) // 2
+        half = len(x) // 2 if name.startswith("motion") else len(x)
         aux_data[a] = np.where(np.arange(len(x)) < half, quiet, shaking) + (
             1.0 if a.endswith("_z") else 0.0
         )

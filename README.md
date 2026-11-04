@@ -73,6 +73,33 @@ run's `report.md`; `pulse-qc holdout <run>` writes the held-out one.
 
 ![Held-out F1 by activity, with and without quality gating](docs/fig_f1_heldout_periodicity.png)
 
+### Does motion explain the errors better than periodicity?
+
+The PTT-PPG device carries an accelerometer, so there is a second, independent way to
+gate: a `motion` rule that fails a window when the standard deviation of the acceleration
+magnitude exceeds a threshold. Same windows, same beats, same leave-one-subject-out
+protocol, thresholds chosen on the other five subjects each time. AUC is how well the raw
+rule value ranks the bad windows (mean beat F1 below 0.9) within that activity.
+
+| activity | AUC motion | AUC periodicity | F1 all | F1 passed (motion) | beats kept | F1 passed (periodicity) | beats kept |
+|---|---|---|---|---|---|---|---|
+| sit | 0.74 | 0.49 | 0.982 | 0.982 | 100% | 0.982 | 97% |
+| walk | 0.73 | 0.88 | 0.906 | 0.950 | 50% | 0.978 | 53% |
+| run | 0.64 | 0.63 | 0.934 | – | 0% | 0.944 | 76% |
+| all | 0.72 | 0.77 | 0.939 | 0.971 | 47% | 0.967 | 74% |
+
+The accelerometer tells you *whether the subject was moving*, which is not the same as
+whether beat detection failed. Motion is uniformly high while running (0.9–5 g RMS) yet
+most running windows detect fine (F1 0.93), so any motion threshold that removes the bad
+walking windows removes every running window too. Within an activity, the signal's own
+periodicity ranks the bad walking windows better (AUC 0.88 vs 0.73), and neither rule
+ranks the running errors well (0.63 vs 0.64). Motion wins only while sitting, where there
+is almost nothing to fix. So on this data the signal-derived rule is the more useful gate,
+and the honest reading of the running errors is that they are not explained by either
+rule yet.
+
+![Held-out F1 with the motion rule](docs/fig_f1_heldout_motion.png)
+
 ![Example record with QC windows shaded](docs/fig_example_qc.png)
 
 A second config (`configs/bidmc.yaml`) runs the same rules and detectors on five BIDMC
@@ -138,8 +165,9 @@ load  ->  preprocess  ->  detect (x3)  ->  evaluate (x3)
   HTTP range requests instead of downloaded. Demographic header fields are dropped on read.
 - **QC rules** (`qc/rules.py`): pure functions of one window and the sampling rate,
   registered by name, parametrised from YAML. `nan_dropout`, `sampling_gap`, `flatline`,
-  `clipping`, `plausible_range`, `periodicity`. Each returns pass/fail, the value the
-  decision was made on, and a reason string. Every rule has unit tests on synthetic
+  `clipping`, `plausible_range`, `periodicity`, and `motion` (which reads auxiliary
+  accelerometer channels). Each returns pass/fail, the value the decision was made on, and
+  a reason string. Every rule has unit tests on synthetic
   signals with injected faults.
 - **Cache** (`cache.py`): every stage result is stored under a key made from the raw file
   hashes, the relevant config section, and the source code of the stage. Changing a QC
@@ -209,5 +237,4 @@ licences as above.
 
 ## Next
 
-- Rules that use auxiliary channels (the PTT-PPG set has an IMU; motion is what actually
-  breaks these windows).
+- A rule that explains the running errors; neither motion nor periodicity does.

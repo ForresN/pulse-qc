@@ -16,5 +16,9 @@ Read `README.md` first; this file is only what is not obvious from it.
   the 254k-sample records. `elgendi` and `charlton` (MSPTD) are fine.
 - **Raw MAX30101 PPG in PTT-PPG dips at systole**: `preprocess.invert: true` in that config.
   BIDMC `PLETH` is already upright.
-- The `periodicity` rule's threshold (0.5) was chosen on the same six PTT-PPG subjects used
-  for evaluation. Say so wherever its numbers are quoted.
+- Thresholds for `periodicity` and `motion` in `configs/ptt-ppg.yaml` are the leave-one-subject-out
+  consensus from `pulse-qc holdout`; the README quotes the held-out numbers, `report.md` is
+  in-sample. Rerun `holdout` after touching either rule. The motion candidate grid is log-spaced
+  because walking and running differ by an order of magnitude in g.
+- CHARIS is streamed as 2 h segments (`segment:` in the config); no whole-file checksum is
+  possible for a segment, so provenance records the SHA-256 of the cached samples.

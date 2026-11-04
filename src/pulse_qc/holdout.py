@@ -25,10 +25,12 @@ import pandas as pd
 #: name -> (parameter name, direction in which the rule FAILS).
 THRESHOLD_RULES: dict[str, tuple[str, str]] = {
     "periodicity": ("min_acf", "below"),
+    "motion": ("max_std_g", "above"),
 }
 
 DEFAULT_CANDIDATES: dict[str, np.ndarray] = {
     "periodicity": np.round(np.arange(0.30, 0.86, 0.05), 2),
+    "motion": np.round(np.geomspace(0.005, 3.0, 40), 4),
 }
 
 
@@ -222,6 +224,42 @@ def write_holdout(run_dir: Path, rules: list[str], bad_f1: float = 0.9) -> Path:
         res.folds.to_csv(Path(run_dir) / f"holdout_{rule}_folds.csv", index=False)
         res.summary.to_csv(Path(run_dir) / f"holdout_{rule}_summary.csv", index=False)
         res.auc.to_csv(Path(run_dir) / f"holdout_{rule}_auc.csv", index=False)
+    if len(results) > 1:
+        md.append("## Which rule explains the errors better?")
+        md.append("")
+        md.append(
+            "Same windows, same beats, same held-out protocol. AUC says how well the raw value "
+            "ranks bad windows; the gain and the beats kept say what a held-out threshold buys."
+        )
+        md.append("")
+        rows = []
+        for rule, res in results.items():
+            gt = gating_table(res.summary)
+            for act in list(dict.fromkeys(gt["activity"])):
+                sub = gt[gt["activity"] == act]
+                a = res.auc.set_index("activity")["auc"].get(act, np.nan)
+                rows.append(
+                    {
+                        "rule": rule,
+                        "activity": act,
+                        "AUC": a,
+                        "F1 (all)": float(sub["F1 (all)"].mean()),
+                        "F1 (passed, held-out)": float(sub["F1 (passed)"].mean()),
+                        "beats kept": float(sub["beats (passed)"].sum() / sub["beats (all)"].sum())
+                        if sub["beats (all)"].sum()
+                        else np.nan,
+                    }
+                )
+        cmp_df = pd.DataFrame(rows)
+        order = {"all": 0, "sit": 1, "walk": 2, "run": 3}
+        cmp_df["_o"] = cmp_df["activity"].map(lambda a: order.get(a, 9))
+        cmp_df = cmp_df.sort_values(
+            ["activity", "rule"], key=lambda c: c.map(order) if c.name == "activity" else c
+        )
+        cmp_df = cmp_df.drop(columns="_o")
+        md.append(_md_table(cmp_df, list(cmp_df.columns), {"beats kept": lambda v: f"{v:.0%}"}))
+        md.append("")
+        cmp_df.to_csv(Path(run_dir) / "holdout_comparison.csv", index=False)
     out = Path(run_dir) / "holdout.md"
     out.write_text("\n".join(md))
     return out

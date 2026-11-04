@@ -67,6 +67,11 @@ def synthetic_run(tmp_path_factory):
 def test_loso_on_synthetic(synthetic_run):
     r = synthetic_run
     assert set(r.window_qc["subject"]) == {"a", "b"}
+    # the synthetic accelerometer shakes in the second half of the motion_b record only
+    mb = r.window_qc[r.window_qc["record"] == "synthetic/motion_b:signal"].set_index("window")
+    assert (mb.loc[:2, "motion"] < 0.05).all() and (mb.loc[3:, "motion"] > 0.1).all()
+    others = r.window_qc[r.window_qc["record"] != "synthetic/motion_b:signal"]
+    assert (others["motion"] < 0.05).all()
     res = loso(r.window_qc, r.beat_counts, "periodicity")
     assert sorted(res.folds["held_out_subject"]) == ["a", "b"]
     assert len(res.gated_windows) == len(r.window_qc)
@@ -87,9 +92,12 @@ def test_loso_rejects_unknown_rule(synthetic_run):
 
 def test_write_holdout_and_cli(synthetic_run):
     r = synthetic_run
-    out = write_holdout(r.run_dir, ["periodicity"])
+    out = write_holdout(r.run_dir, ["periodicity", "motion"])
     md = out.read_text()
     assert "Per fold" in md and "held_out_subject" in md
+    assert "Which rule explains the errors better?" in md
+    assert (r.run_dir / "holdout_comparison.csv").exists()
+    assert (r.run_dir / "fig_f1_heldout_motion.png").exists()
     assert (r.run_dir / "holdout_periodicity_folds.csv").exists()
     res = CliRunner().invoke(app, ["holdout", str(r.run_dir)])
     assert res.exit_code == 0, res.output

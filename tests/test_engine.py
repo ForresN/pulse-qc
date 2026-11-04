@@ -69,3 +69,19 @@ def test_window_index_of():
     s = np.array([0, 199, 200, 999, 1000, 5000])
     assert window_index_of(s, w).tolist() == [0, 0, 1, 4, -1, -1]
     assert window_index_of(s, w[:0]).tolist() == [-1] * 6
+
+
+def test_engine_passes_aux_to_rules_that_want_it(clean):
+    fs = clean.fs
+    n = len(clean.signal)
+    aux = {
+        "a_x": np.zeros(n),
+        "a_y": np.zeros(n),
+        "a_z": np.r_[np.ones(n // 2), 1 + np.random.default_rng(0).normal(0, 0.5, n - n // 2)],
+    }
+    rs = RuleSet.from_config(
+        {"rules": [{"name": "motion", "max_std_g": 0.1}, {"name": "nan_dropout"}]}
+    )
+    df = apply_rules(clean.signal, fs, make_windows(n, fs, 10.0), rs, aux=aux)
+    assert df["passed"].tolist() == [True, True, True, False, False, False]
+    assert df.loc[3, "reasons"].startswith("motion:")

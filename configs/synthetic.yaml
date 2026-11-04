@@ -6,7 +6,8 @@ data:
       channel: signal
       annotator: beats
       subject_pattern: "_([a-z])$"     # clean_a and dropout_a are "subject a"
-      names: [clean_a, clean_b, dropout_a, flat_a, clipped_a]
+      aux_channels: [a_x, a_y, a_z]    # synthetic accelerometer: still, then shaking
+      names: [clean_a, clean_b, dropout_a, flat_a, clipped_a, motion_b]
 preprocess:
   invert: false
   band_hz: [0.5, 8.0]
@@ -21,6 +22,7 @@ qc:
     - {name: clipping, max_frac: 0.02, min_run: 3}
     - {name: plausible_range, lo: -1, hi: 10}
     - {name: periodicity, min_acf: 0.5, lag_range_s: [0.3, 2.0]}
+    - {name: motion, channels: [a_x, a_y, a_z], max_std_g: 0.1}
 detectors:
   - {name: elgendi}
   - {name: prominence}

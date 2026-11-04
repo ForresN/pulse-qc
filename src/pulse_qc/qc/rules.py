@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-RULES_VERSION = 2  # 2: added `periodicity`
+RULES_VERSION = 3  # 2: added `periodicity`; 3: added `motion`
 
 
 @dataclass(frozen=True)
@@ -166,3 +166,33 @@ def periodicity(
 
 
 RULES["periodicity"] = periodicity
+
+
+def motion(
+    x: np.ndarray,
+    fs: float,
+    *,
+    aux: dict[str, np.ndarray],
+    channels: tuple[str, ...] = ("a_x", "a_y", "a_z"),
+    max_std_g: float = 0.1,
+) -> RuleResult:
+    """Fail when the accelerometer says the sensor was moving.
+
+    Uses auxiliary channels (loaded alongside the signal with ``aux_channels`` in the
+    config): the value is the standard deviation of the acceleration vector magnitude
+    over the window, in g, which is orientation-independent and zero for a still
+    sensor regardless of how it is held. A missing channel is a failure with a reason,
+    not a silent pass."""
+    missing = [c for c in channels if c not in aux]
+    if missing:
+        return RuleResult(False, float("nan"), f"accelerometer channels missing: {missing}")
+    mag = np.sqrt(sum(np.asarray(aux[c], dtype=float) ** 2 for c in channels))
+    finite = mag[np.isfinite(mag)]
+    if finite.size < 2:
+        return RuleResult(False, float("nan"), "no finite accelerometer samples")
+    sd = float(finite.std())
+    ok = sd <= max_std_g
+    return RuleResult(ok, sd, "" if ok else f"motion {sd:.3f} g RMS (max {max_std_g:.3f} g)")
+
+
+RULES["motion"] = motion
