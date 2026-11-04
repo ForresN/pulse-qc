@@ -1,0 +1,29 @@
+# Synthetic fixtures only: no download, used by the test-suite and CI.
+name: synthetic
+data:
+  records:
+    - db: synthetic
+      channel: signal
+      annotator: beats
+      names: [clean_a, clean_b, dropout_a, flat_a, clipped_a]
+preprocess:
+  invert: false
+  band_hz: [0.5, 8.0]
+windows:
+  length_s: 10
+qc:
+  version: 1
+  rules:
+    - {name: nan_dropout, max_frac: 0.01}
+    - {name: sampling_gap, max_gap_s: 0.2}
+    - {name: flatline, max_flat_s: 0.5}
+    - {name: clipping, max_frac: 0.02, min_run: 3}
+    - {name: plausible_range, lo: -1, hi: 10}
+detectors:
+  - {name: elgendi}
+  - {name: prominence}
+evaluation:
+  tolerance_ms: 50
+  lag_search_ms: [0, 100]
+output_dir: runs
+cache_dir: cache
